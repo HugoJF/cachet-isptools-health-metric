@@ -8,8 +8,8 @@ import functools
 from requests.exceptions import ConnectionError, ReadTimeout, ConnectTimeout
 from statistics import stdev
 from dotenv import load_dotenv
+from terminaltables import AsciiTable
 
-# DotEnv loading
 print('Loading env file...')
 load_dotenv()
 
@@ -25,6 +25,7 @@ api_key = os.getenv('API_KEY')
 url = os.getenv('URL')
 metric_id = int(os.getenv('METRIC_ID'))
 acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
+pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
 
 # Static declaration
 pop_time = time_to_refresh / ping_history
@@ -33,6 +34,55 @@ servers = []
 headers = {
     'X-Cachet-Token': api_key
 }
+
+
+def eprint(*args, **kwargs):
+    sys.stdout.flush()
+    print(*args, file=sys.stderr, **kwargs)
+    sys.stderr.flush()
+
+
+def cache_dotenv():
+    print('Loading env file... {0}'.format(load_dotenv(verbose=True, override=True)))
+
+    global \
+        servers_path, \
+        ping_history, \
+        ip, \
+        interval, \
+        alpha, \
+        margin, \
+        time_to_refresh, \
+        api_key, \
+        url, \
+        metric_id, \
+        acceptable_loss, \
+        pop_time, \
+        api_url, \
+        headers
+
+    # DotEnv caching
+    servers_path = os.getenv('SERVERS_FILE')
+    ping_history = int(os.getenv('PING_HISTORY'))
+    ip = os.getenv('IP')
+    interval = int(os.getenv('INTERVAL'))
+    alpha = float(os.getenv('ALPHA'))
+    margin = float(os.getenv('MARGIN'))
+    time_to_refresh = int(os.getenv('TIME_TO_REFRESH'))
+    api_key = os.getenv('API_KEY')
+    url = os.getenv('URL')
+    metric_id = int(os.getenv('METRIC_ID'))
+    acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
+    pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
+
+    # Static declaration
+    pop_time = time_to_refresh / ping_history
+    api_url = 'http://{0}/PING/{1}'
+    headers = {
+        'X-Cachet-Token': api_key
+    }
+
+    print('DotEnv: {0}'.format(float(os.getenv('ALPHA'))))
 
 
 class Server:
@@ -52,7 +102,7 @@ class Server:
         self.jitter = 0
         self.last_pop = 0
 
-    def receive_ping(self, ms):
+    def receive_ping(self, ms: int) -> object:
         self.pings += 1
 
         # Received history
@@ -82,12 +132,12 @@ class Server:
             self.lowest.append(ms)
 
             # Remove if full
-            if len(self.lowest) > ping_history:
+            while len(self.lowest) > ping_history:
                 self.lowest.remove(m)
 
         # Populate history
         self.history.insert(0, ms)
-        if len(self.history) > ping_history:
+        while len(self.history) > ping_history:
             self.history.pop()
 
         # Check for pop
@@ -103,6 +153,7 @@ class Server:
 
                 # Check for successful response
                 if res.status_code != 200:
+                    eprint('Health check raised error for status {0}'.format(res.status_code))
                     raise ConnectionError
 
                 self.status = True
@@ -123,11 +174,11 @@ class Server:
         if not self.status:
             return False
 
-        return ((self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2
-                 and len(self.history) > ping_history)
-                or
-                (self.loss() > acceptable_loss)
-                and self.pings > ping_history)
+        return (((self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2)
+                 or
+                 (self.loss() > acceptable_loss))
+                and
+                len(self.history) > ping_history)
 
     def loss(self):
         if len(self.received) == 0:
@@ -161,8 +212,9 @@ def ping(src, dst):
 
     # Send GET request
     try:
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, timeout=pinging_timeout)
     except:
+        eprint('Exception while requesting pings')
         return False
 
     # Check for successful response
@@ -193,6 +245,9 @@ def load_servers():
 load_servers()
 
 while True:
+    # Reload DotEnv
+    cache_dotenv()
+
     # Dispatch threads
     for sv in servers:
         sv.ping()
@@ -204,17 +259,21 @@ while True:
     abnormal = 0
 
     # Check for abnormal servers
+    table_data = [['Server URL', 'Average', 'History', 'Loss', 'Abnormal']]
     for sv in servers:
         if sv.abnormal():
-            print('{0}\t{1:.2f}+-{2:.2f}\t>\t{3:.2f} > std{4} | loss({5})'.format(
-                sv.url,
-                sv.avg,
-                sv.stdev(),
-                sv.minimum(),
-                len(sv.history),
-                sv.loss()
-            ))
             abnormal += 1
+        table_data.append([
+            sv.url,
+            '{0:.2f} +-{1:.2f}'.format(sv.avg, sv.stdev()),
+            len(sv.history),
+            '{0}'.format(sv.loss()),
+            'YES' if sv.abnormal() else '---'
+        ])
+
+    table = AsciiTable(table_data)
+
+    print(table.table)
 
     # Debug
     print('Currently {0} abnormal servers.'.format(abnormal))
@@ -226,8 +285,11 @@ while True:
     }
 
     # Send POST
-    res = requests.post(url + '/api/v1/metrics/{0}/points'.format(metric_id), data=data, headers=headers)
-    print('Status code for POST: {0}'.format(res.status_code))
+    try:
+        res = requests.post(url + '/api/v1/metrics/{0}/points'.format(metric_id), data=data, headers=headers)
+        print('Status code for POST: {0}'.format(res.status_code))
+    except:
+        print('Error posting data')
 
     # Flush and wait
     sys.stdout.flush()
