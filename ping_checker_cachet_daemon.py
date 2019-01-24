@@ -31,6 +31,7 @@ url = os.getenv('URL')
 metric_id = int(os.getenv('METRIC_ID'))
 acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
 pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
+jitter_margin = float(os.getenv('JITTER_MARGIN'))
 sentry_url = os.getenv('SENTRY_URL')
 host = os.getenv('HOST')
 port = os.getenv('PORT')
@@ -88,7 +89,9 @@ def cache_dotenv():
         acceptable_loss, \
         pop_time, \
         api_url, \
-        headers
+        headers, \
+        pinging_timeout, \
+        jitter_margin
 
     # DotEnv caching
     servers_path = os.getenv('SERVERS_FILE')
@@ -103,6 +106,7 @@ def cache_dotenv():
     metric_id = int(os.getenv('METRIC_ID'))
     acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
     pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
+    jitter_margin = float(os.getenv('JITTER_MARGIN'))
 
     # Static declaration
     pop_time = time_to_refresh / ping_history
@@ -223,12 +227,15 @@ class Server:
                         and
                         len(self.history) >= ping_history
                 )
-
                 or
                 (
                     (self.loss() > acceptable_loss)
                     and
                     self.pings >= ping_history
+                )
+                or
+                (
+                    self.stdev() > self.minimum() * jitter_margin
                 )
         )
 
@@ -260,6 +267,8 @@ class Server:
 
 
 def ping(src, dst):
+    global pinging_timeout
+
     url = api_url.format(src, dst)
 
     # Send GET request
