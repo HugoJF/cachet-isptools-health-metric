@@ -32,6 +32,8 @@ metric_id = int(os.getenv('METRIC_ID'))
 acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
 pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
 sentry_url = os.getenv('SENTRY_URL')
+host = os.getenv('HOST')
+port = os.getenv('PORT')
 
 # Static declaration
 current_sha = None
@@ -365,4 +367,4 @@ runner_thread.start()
 api.add_resource(ServerApi, '/servers/')
 api.add_resource(PingsApi, '/pings/<int:id>')
 
-app.run(debug=True)
+app.run(debug=True, host=host, port=port)
