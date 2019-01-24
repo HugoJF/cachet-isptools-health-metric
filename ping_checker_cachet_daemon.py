@@ -72,7 +72,7 @@ def check_for_new_version():
 
 
 def cache_dotenv():
-    print('Loading env file... {0}'.format(load_dotenv(verbose=True, override=True)))
+    print('Loading DotEnv file... {0}'.format(load_dotenv(verbose=True, override=True)))
 
     global \
         servers_path, \
