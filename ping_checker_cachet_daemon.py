@@ -136,8 +136,11 @@ class Server:
             'id': self.id,
             'name': self.name,
             'url': self.url,
+            'status': self.status,
             'abnormal': self.abnormal(),
             'ping': self.avg,
+            'loss': self.loss(),
+            'pings': self.pings,
             'baseline': self.minimum(),
             'jitter': self.stdev(),
         }
@@ -214,11 +217,20 @@ class Server:
         if not self.status:
             return False
 
-        return (((self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2)
-                 or
-                 (self.loss() > acceptable_loss))
-                and
-                len(self.history) > ping_history)
+        return (
+                (
+                        (self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2)
+                        and
+                        len(self.history) >= ping_history
+                )
+
+                or
+                (
+                    (self.loss() > acceptable_loss)
+                    and
+                    self.pings >= ping_history
+                )
+        )
 
     def loss(self):
         if len(self.received) == 0:
@@ -323,7 +335,7 @@ def runner():
         abnormal = 0
 
         # Check for abnormal servers
-        table_data = [['Server URL', 'Average', 'History', 'Loss', 'Abnormal']]
+        table_data = [['Server URL', 'Average', 'History', 'Pings', 'Loss', 'Abnormal']]
         for sv in servers:
             if sv.abnormal():
                 abnormal += 1
@@ -331,13 +343,14 @@ def runner():
                 sv.url,
                 '{0:.2f} +-{1:.2f}'.format(sv.avg, sv.stdev()),
                 len(sv.history),
+                sv.pings,
                 '{0}'.format(sv.loss()),
                 'YES' if sv.abnormal() else '---'
             ])
 
-        # table = AsciiTable(table_data)
+        table = AsciiTable(table_data)
 
-        # print(table.table)
+        print(table.table)
 
         # Debug
         print('Currently {0} abnormal servers.'.format(abnormal))
