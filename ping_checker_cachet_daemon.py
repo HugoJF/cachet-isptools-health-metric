@@ -15,65 +15,17 @@ from flask import Flask
 from flask_restful import Api, Resource, reqparse
 from flask_cors import CORS
 
-print('Loading env file...')
-load_dotenv()
 
-# DotEnv caching
-servers_path = os.getenv('SERVERS_FILE')
-ping_history = int(os.getenv('PING_HISTORY'))
-ip = os.getenv('IP')
-interval = int(os.getenv('INTERVAL'))
-alpha = float(os.getenv('ALPHA'))
-margin = float(os.getenv('MARGIN'))
-time_to_refresh = int(os.getenv('TIME_TO_REFRESH'))
-api_key = os.getenv('API_KEY')
-url = os.getenv('URL')
-metric_id = int(os.getenv('METRIC_ID'))
-acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
-pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
-jitter_margin = float(os.getenv('JITTER_MARGIN'))
-sentry_url = os.getenv('SENTRY_URL')
-host = os.getenv('HOST')
-port = os.getenv('PORT')
-
-# Static declaration
-current_sha = None
-pop_time = time_to_refresh / ping_history
-api_url = 'http://{0}/PING/{1}'
-servers = []
-headers = {
-    'X-Cachet-Token': api_key
-}
-
-sentry_sdk.init(sentry_url)
-app = Flask('PingChecker')
-api = Api(app)
-
-CORS(app)
-
-
-def eprint(*args, **kwargs):
-    sys.stdout.flush()
-    print(*args, file=sys.stderr, **kwargs)
-    sys.stderr.flush()
-
-
-def check_for_new_version():
-    global current_sha
-
-    repo = git.Repo()
-    sha = repo.head.object.hexsha
-
-    if current_sha is None:
-        print('Running on commit #{0}'.format(sha))
-        current_sha = sha
-    elif current_sha != sha:
-        print('New version found, quitting...')
-        quit(0)
+######################
+# Method definitions #
+######################
 
 
 def cache_dotenv():
-    print('Loading DotEnv file... {0}'.format(load_dotenv(verbose=True, override=True)))
+    """
+    Loads DotEnv file to variables
+    """
+    print('Loading DotEnv file: {0}'.format(load_dotenv(verbose=True, override=True)))
 
     global \
         servers_path, \
@@ -91,22 +43,60 @@ def cache_dotenv():
         api_url, \
         headers, \
         pinging_timeout, \
-        jitter_margin
+        jitter_margin, \
+        sentry_url, \
+        host, \
+        port
 
     # DotEnv caching
+
+    # Path to servers.json file
     servers_path = os.getenv('SERVERS_FILE')
+
+    # How many pings will be stored per server
     ping_history = int(os.getenv('PING_HISTORY'))
+
+    # IP to bind backend
     ip = os.getenv('IP')
+
+    # Refreshing interval between requests
     interval = int(os.getenv('INTERVAL'))
+
+    # How fast the moving average for pings will change
     alpha = float(os.getenv('ALPHA'))
+
+    # How high can the average ping go beyond the baseline
     margin = float(os.getenv('MARGIN'))
+
+    # How many seconds to completely refresh baseline values
     time_to_refresh = int(os.getenv('TIME_TO_REFRESH'))
+
+    # Cachet API key
     api_key = os.getenv('API_KEY')
+
+    # Cachet URL
     url = os.getenv('URL')
+
+    # What metric should be posted
     metric_id = int(os.getenv('METRIC_ID'))
+
+    # Acceptable packet loss
     acceptable_loss = float(os.getenv('ACCEPTABLE_LOSS'))
+
+    # Ping request timeout
     pinging_timeout = float(os.getenv('PINGING_TIMEOUT'))
+
+    # Relation between baseline and maximum jitter
     jitter_margin = float(os.getenv('JITTER_MARGIN'))
+
+    # Sentry URL
+    sentry_url = os.getenv('SENTRY_URL')
+
+    # Flask host bind
+    host = os.getenv('HOST')
+
+    # Flask port bind
+    port = os.getenv('PORT')
 
     # Static declaration
     pop_time = time_to_refresh / ping_history
@@ -118,8 +108,75 @@ def cache_dotenv():
     print('DotEnv: {0}'.format(float(os.getenv('ALPHA'))))
 
 
-class Server:
+def eprint(*args, **kwargs):
+    """
+    Error printing
+    """
+    sys.stdout.flush()
+    print(*args, file=sys.stderr, **kwargs)
+    sys.stderr.flush()
 
+
+def check_for_new_version():
+    """
+    Checks for new commit SHAs on current directory
+    """
+    global current_sha
+
+    repo = git.Repo()
+    sha = repo.head.object.hexsha
+
+    if current_sha is None:
+        print('Running on commit #{0}'.format(sha))
+        current_sha = sha
+    elif current_sha != sha:
+        print('New version found, quitting...')
+        quit(0)
+
+
+def ping(src, dst):
+    global pinging_timeout
+
+    url = api_url.format(src, dst)
+
+    # Send GET request
+    try:
+        res = requests.get(url, timeout=pinging_timeout)
+    except:
+        eprint('Exception while requesting pings')
+        return False
+
+    # Check for successful response
+    if res.status_code != 200:
+        raise ConnectionError
+
+    # Parse response JSON
+    res = json.loads(res.text)
+
+    # Check if response is valid
+    if res['err']:
+        return False
+
+    return int(res['ms'])
+
+
+def load_servers():
+    file = open(servers_path, 'r')
+    svs = json.load(file)
+
+    print('Loaded {0} servers from file'.format(len(svs)))
+
+    # Create object
+    for data in svs:
+        servers.append(Server(data))
+
+
+###########
+# Classes #
+###########
+
+
+class Server:
     def __init__(self, data):
         self.id = data[0]
         self.name = data[1]
@@ -142,6 +199,9 @@ class Server:
             'url': self.url,
             'status': self.status,
             'abnormal': self.abnormal(),
+            'abnormal_ping': self.abnormal_ping(),
+            'abnormal_loss': self.abnormal_loss(),
+            'abnormal_jitter': self.abnormal_jitter(),
             'ping': self.avg,
             'loss': self.loss(),
             'pings': self.pings,
@@ -217,27 +277,30 @@ class Server:
 
             self.receive_ping(ms)
 
+    def abnormal_ping(self):
+        return (
+                (self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2)
+                and
+                len(self.history) >= ping_history
+        )
+
+    def abnormal_loss(self):
+        return (
+                (self.loss() > acceptable_loss)
+                and
+                self.pings >= ping_history
+        )
+
+    def abnormal_jitter(self):
+        return (
+                self.stdev() > self.minimum() * jitter_margin
+        )
+
     def abnormal(self):
         if not self.status:
             return False
 
-        return (
-                (
-                        (self.avg > self.minimum() + max(self.stdev(), self.minimum() * margin) * 2)
-                        and
-                        len(self.history) >= ping_history
-                )
-                or
-                (
-                    (self.loss() > acceptable_loss)
-                    and
-                    self.pings >= ping_history
-                )
-                or
-                (
-                    self.stdev() > self.minimum() * jitter_margin
-                )
-        )
+        return self.abnormal_ping() or self.abnormal_loss() or self.abnormal_jitter()
 
     def loss(self):
         if len(self.received) == 0:
@@ -266,41 +329,9 @@ class Server:
             return 0
 
 
-def ping(src, dst):
-    global pinging_timeout
-
-    url = api_url.format(src, dst)
-
-    # Send GET request
-    try:
-        res = requests.get(url, timeout=pinging_timeout)
-    except:
-        eprint('Exception while requesting pings')
-        return False
-
-    # Check for successful response
-    if res.status_code != 200:
-        raise ConnectionError
-
-    # Parse response JSON
-    res = json.loads(res.text)
-
-    # Check if response is valid
-    if res['err']:
-        return False
-
-    return int(res['ms'])
-
-
-def load_servers():
-    file = open(servers_path, 'r')
-    svs = json.load(file)
-
-    print('Loaded {0} servers from file'.format(len(svs)))
-
-    # Create object
-    for data in svs:
-        servers.append(Server(data))
+#################
+# API Resources #
+#################
 
 
 class ServerApi(Resource):
@@ -324,10 +355,16 @@ class PingsApi(Resource):
         }
 
 
+######################
+# Main runner method #
+######################
+
+
 def runner():
     load_servers()
 
     while True:
+        # Check if there is a new version
         check_for_new_version()
 
         # Reload DotEnv
@@ -348,6 +385,7 @@ def runner():
         for sv in servers:
             if sv.abnormal():
                 abnormal += 1
+
             table_data.append([
                 sv.url,
                 '{0:.2f} +-{1:.2f}'.format(sv.avg, sv.stdev()),
@@ -357,6 +395,7 @@ def runner():
                 'YES' if sv.abnormal() else '---'
             ])
 
+        # Build and print table
         table = AsciiTable(table_data)
 
         print(table.table)
@@ -377,16 +416,67 @@ def runner():
         except:
             print('Error posting data')
 
-        print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
         # Flush and wait
+        print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
         sys.stdout.flush()
         time.sleep(interval)
 
 
+#############################
+# DotEnv variable re-naming #
+#############################
+
+
+# Loads environment file first
+print('Loading DotEnv file...')
+load_dotenv()
+
+# Save variables
+cache_dotenv()
+
+######################
+# Static declaration #
+######################
+
+
+# SHA from current commit
+current_sha = None
+
+# How long to wait between baseline pops
+pop_time = time_to_refresh / ping_history
+
+# API URL pattern
+api_url = 'http://{0}/PING/{1}'
+
+# Server instances list
+servers = []
+
+# Header that is sent while POSTing to Cachet
+headers = {
+    'X-Cachet-Token': api_key
+}
+
+#########################
+# Static initialization #
+#########################
+
+# Initialize sentry
+sentry_sdk.init(sentry_url)
+
+# Initialize Flask
+app = Flask('PingChecker')
+api = Api(app)
+
+# Setup CORS
+CORS(app)
+
+# Prepare runner thread
 runner_thread = threading.Thread(target=runner)
 runner_thread.start()
 
+# Prepare API resources
 api.add_resource(ServerApi, '/servers/')
 api.add_resource(PingsApi, '/pings/<int:id>')
 
+# Run API
 app.run(debug=True, host=host, port=port)
