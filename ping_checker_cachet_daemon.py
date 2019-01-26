@@ -46,7 +46,8 @@ def cache_dotenv():
         jitter_margin, \
         sentry_url, \
         host, \
-        port
+        port, \
+        health_test_ip
 
     # DotEnv caching
 
@@ -97,6 +98,9 @@ def cache_dotenv():
 
     # Flask port bind
     port = os.getenv('PORT')
+
+    # Reliable IP to test if PING API is responding correctly
+    health_test_ip = os.getenv('HEALTH_TEST_IP')
 
     # Static declaration
     pop_time = time_to_refresh / ping_history
@@ -255,7 +259,10 @@ class Server:
     def health_check(self):
         try:
             if time.time() - self.last_check > 30:
+                # Update timer
                 self.last_check = time.time()
+
+                # Request information from server
                 res = requests.get('http://{0}/'.format(self.url), timeout=1)
 
                 # Check for successful response
@@ -263,6 +270,14 @@ class Server:
                     eprint('Health check raised error for status {0}'.format(res.status_code))
                     raise ConnectionError
 
+                # Attempts to ping reliable IP
+                res = requests.get(api_url.format(self.url, health_test_ip))
+
+                # Raise error for reliable IP
+                if res.status_code != 200:
+                    eprint('Health check raised error for status {0} on reliable IP: {1]'.format(res.status_code, health_test_ip))
+
+                # If reached this point, node is healthy
                 self.status = True
                 print('Server {0} turned ON.'.format(self.url))
         except:
