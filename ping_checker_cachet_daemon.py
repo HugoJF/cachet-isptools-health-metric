@@ -275,7 +275,7 @@ class Server:
 
                 # Raise error for reliable IP
                 if res.status_code != 200:
-                    eprint('Health check raised error for status {0} on reliable IP: {1]'.format(res.status_code, health_test_ip))
+                    eprint('Health check raised error for status {0} on reliable IP: {1}'.format(res.status_code, health_test_ip))
 
                 # If reached this point, node is healthy
                 self.status = True
