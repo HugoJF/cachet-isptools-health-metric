@@ -47,7 +47,9 @@ def cache_dotenv():
         sentry_url, \
         host, \
         port, \
-        health_test_ip
+        health_test_ip, \
+        ping_interval, \
+        worker_count
 
     # DotEnv caching
 
@@ -102,6 +104,12 @@ def cache_dotenv():
     # Reliable IP to test if PING API is responding correctly
     health_test_ip = os.getenv('HEALTH_TEST_IP')
 
+    # Worker refresh interval
+    ping_interval = float(os.getenv('PING_INTERVAL'))
+
+    # Worker count
+    worker_count = int(os.getenv('WORKER_COUNT'))
+
     # Static declaration
     pop_time = time_to_refresh / ping_history
     api_url = 'http://{0}/PING/{1}'
@@ -138,7 +146,13 @@ def check_for_new_version():
         quit(0)
 
 
-def ping(src, dst):
+def ping(src: str, dst: str) -> int or False:
+    """
+    Pinging function
+    :param src: IP address
+    :param dst: IP address
+    :return: int: ping in milliseconds or False if ping failed
+    """
     global pinging_timeout
 
     url = api_url.format(src, dst)
@@ -195,6 +209,7 @@ class Server:
         self.avg = -1
         self.jitter = 0
         self.last_pop = 0
+        self.last_check = 0
 
     def toJSON(self):
         return {
@@ -287,6 +302,7 @@ class Server:
     def send_ping(self):
         self.health_check()
 
+        # Only ping if server is considered healthy
         if self.status:
             ms = ping(self.url, ip)
 
@@ -330,9 +346,11 @@ class Server:
         return sum(self.lowest) / len(self.lowest)
 
     def ping(self):
-        self.ping_thread = threading.Thread(target=self.send_ping)
+        self.last_check = time.time()
+        self.send_ping()
 
-        self.ping_thread.start()
+    def expired(self):
+        return time.time() - self.last_check > 5
 
     def wait(self):
         self.ping_thread.join()
@@ -374,9 +392,29 @@ class PingsApi(Resource):
 # Main runner method #
 ######################
 
+def worker():
+    while True:
+        oldest = None
+        oldest_time = time.time()
+
+        for sv in servers:  # type: Server
+            if oldest is None or sv.last_check < oldest_time:
+                oldest = sv
+                oldest_time = sv.last_check
+
+        if oldest is not None:
+            oldest.health_check()
+            oldest.ping()
+
+        time.sleep(ping_interval)
+
 
 def runner():
     load_servers()
+
+    for i in range(0, worker_count):
+        t = threading.Thread(target=worker)
+        t.start()
 
     while True:
         # Check if there is a new version
@@ -384,14 +422,6 @@ def runner():
 
         # Reload DotEnv
         cache_dotenv()
-
-        # Dispatch threads
-        for sv in servers:
-            sv.ping()
-
-        # Join them
-        for sv in servers:
-            sv.wait()
 
         abnormal = 0
 
