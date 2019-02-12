@@ -246,7 +246,7 @@ class Server:
         self.pop_baseline()
 
     def compute_average_ping_rate(self) -> float:
-        return self.pings / start_time
+        return self.pings / (time.time() - start_time)
 
     def compute_average(self, ms) -> None:
         # Compute average
