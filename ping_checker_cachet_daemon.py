@@ -120,7 +120,7 @@ def cache_dotenv():
     print('DotEnv: {0}'.format(float(os.getenv('ALPHA'))))
 
 
-def eprint(*args, **kwargs):
+def eprint(*args, **kwargs) -> None:
     """
     Error printing
     """
@@ -129,7 +129,7 @@ def eprint(*args, **kwargs):
     sys.stderr.flush()
 
 
-def check_for_new_version():
+def check_for_new_version() -> None:
     """
     Checks for new commit SHAs on current directory
     """
@@ -200,7 +200,7 @@ class Server:
         self.name = data[1]
         self.url = data[2]
 
-        self.status = False
+        self.online = False
         self.last_check = 0
         self.lowest = []
         self.history = []
@@ -209,14 +209,14 @@ class Server:
         self.avg = -1
         self.jitter = 0
         self.last_pop = 0
-        self.last_check = 0
 
-    def toJSON(self):
+    def toJSON(self) -> object:
         return {
             'id': self.id,
             'name': self.name,
             'url': self.url,
-            'status': self.status,
+            'online': self.online,
+            'last_check': self.last_check,
             'abnormal': self.abnormal(),
             'abnormal_ping': self.abnormal_ping(),
             'abnormal_loss': self.abnormal_loss(),
@@ -224,6 +224,7 @@ class Server:
             'ping': self.avg,
             'loss': self.loss(),
             'pings': self.pings,
+            'ping_rate': self.compute_average_ping_rate(),
             'baseline': self.minimum(),
             'jitter': self.stdev(),
         }
@@ -234,44 +235,62 @@ class Server:
         # Received history
         self.received.insert(0, ms is not False)
 
-        if len(self.received) > ping_history:
-            self.received.pop()
-
         # Avoid logic when negative
         if not ms or ms < 0:
             return
 
-        # Compute max
-        if len(self.lowest) > 0:
-            m = max(self.lowest)
-        else:
-            m = 0
+        self.compute_average(ms)
+        self.populate_baseline(ms)
+        self.add_ping(ms)
+        self.pop_history()
+        self.pop_baseline()
 
+    def compute_average_ping_rate(self) -> float:
+        return self.pings / start_time
+
+    def compute_average(self, ms) -> None:
         # Compute average
         if self.avg == -1:
             self.avg = ms
         else:
             self.avg = self.avg * (1 - alpha) + ms * alpha
 
+    def baseline_max(self) -> int:
+        # Compute max
+        if len(self.lowest) > 0:
+            return max(self.lowest)
+        else:
+            return 0
+
+    def populate_baseline(self, ms) -> None:
+        max = self.baseline_max()
+
         # Populate ping history
-        if m > ms or len(self.lowest) < ping_history:
+        if max > ms or len(self.lowest) < ping_history:
             self.lowest.append(ms)
 
             # Remove if full
             while len(self.lowest) > ping_history:
-                self.lowest.remove(m)
+                self.lowest.remove(max)
 
+    def add_ping(self, ms: int) -> None:
         # Populate history
         self.history.insert(0, ms)
         while len(self.history) > ping_history:
             self.history.pop()
 
+    def pop_history(self) -> None:
+        # Remove oldest ping if above limit
+        if len(self.received) > ping_history:
+            self.received.pop()
+
+    def pop_baseline(self) -> None:
         # Check for pop
         if time.time() - self.last_pop > pop_time and len(self.lowest) > 0:
             self.lowest.remove(min(self.lowest))
             self.last_pop = time.time()
 
-    def health_check(self):
+    def health_check(self) -> None:
         try:
             if time.time() - self.last_check > 30:
                 # Update timer
@@ -290,20 +309,21 @@ class Server:
 
                 # Raise error for reliable IP
                 if res.status_code != 200:
-                    eprint('Health check raised error for status {0} on reliable IP: {1}'.format(res.status_code, health_test_ip))
+                    eprint('Health check raised error for status {0} on reliable IP: {1}'.format(res.status_code,
+                                                                                                 health_test_ip))
 
                 # If reached this point, node is healthy
-                self.status = True
+                self.online = True
                 print('Server {0} turned ON.'.format(self.url))
         except:
             print('Server {0} turned offline as it\'s not responding...'.format(self.url))
-            self.status = False
+            self.online = False
 
     def send_ping(self):
         self.health_check()
 
         # Only ping if server is considered healthy
-        if self.status:
+        if self.online:
             ms = ping(self.url, ip)
 
             self.receive_ping(ms)
@@ -328,7 +348,7 @@ class Server:
         )
 
     def abnormal(self):
-        if not self.status:
+        if not self.online:
             return False
 
         return self.abnormal_ping() or self.abnormal_loss() or self.abnormal_jitter()
@@ -368,7 +388,6 @@ class Server:
 
 
 class ServerApi(Resource):
-
     def get(self):
         svs = list(map(lambda x: x.toJSON(), servers))
 
@@ -483,6 +502,8 @@ cache_dotenv()
 # Static declaration #
 ######################
 
+# Stores start time for statistics
+start_time = time.time()
 
 # SHA from current commit
 current_sha = None
