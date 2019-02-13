@@ -6,8 +6,8 @@ for filename in ./dbs/*; do
     --imgformat PNG \
     --title="Server latency history (last hour)" \
     --vertical-label "Ping (ms)" \
-    --start=n-61min \
-    --end=n-1min \
+    --start=n-62min \
+    --end=n-2min \
     --color=BACK#CCCCCC \
     --color=CANVAS#FEFEFE \
     --color=SHADEB#9999CC \
