@@ -563,8 +563,7 @@ api = Api(app)
 CORS(app)
 
 # Prepare runner thread
-runner_thread = threading.Thread(target=runner)
-runner_thread.start()
+runner()
 
 # Prepare API resources
 api.add_resource(ServerApi, '/servers/')
