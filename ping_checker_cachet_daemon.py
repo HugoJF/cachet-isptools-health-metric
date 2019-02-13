@@ -1,10 +1,11 @@
+import re
 import time
 import sys
 import json
 import os
 import requests
 import threading
-import functools
+import subprocess
 import git
 import sentry_sdk
 from requests.exceptions import ConnectionError, ReadTimeout, ConnectTimeout
@@ -49,7 +50,8 @@ def cache_dotenv():
         port, \
         health_test_ip, \
         ping_interval, \
-        worker_count
+        worker_count, \
+        rrd_path
 
     # DotEnv caching
 
@@ -109,6 +111,9 @@ def cache_dotenv():
 
     # Worker count
     worker_count = int(os.getenv('WORKER_COUNT'))
+
+    # RRD Path to store databases
+    rrd_path = os.getenv('RRD_PATH', 'dbs/')
 
     # Static declaration
     pop_time = time_to_refresh / ping_history
@@ -175,10 +180,10 @@ def ping(src: str, dst: str) -> int or False:
     if res['err']:
         return False
 
-    return int(res['ms'])
+    return int(res['ms']), int(res['ttl'])
 
 
-def load_servers():
+def load_servers() -> None:
     file = open(servers_path, 'r')
     svs = json.load(file)
 
@@ -187,6 +192,32 @@ def load_servers():
     # Create object
     for data in svs:
         servers.append(Server(data))
+
+
+def create_rrd(path) -> None:
+    subprocess.call(
+        'rrdtool create {0} '
+        '--step 10 '
+        'DS:ping:GAUGE:120:0:5000 ' 
+        'RRA:AVERAGE:0.5:6:4320 '
+        'RRA:MIN:0.5:6:4320 '
+        'RRA:MAX:0.5:6:4320 '
+        'RRA:AVERAGE:0.5:60:4320 '
+        'RRA:MIN:0.5:60:4320 '
+        'RRA:MAX:0.5:60:4320'.format(path),
+        shell=True
+    )
+
+
+def update_rrd(path: str, ping: int, ttl: int, jitter: int):
+    command = 'rrdtool update {0} N:{1}:{2}:{3}'.format(path, ping, ttl, jitter)
+
+    print('exec: {0}'.format(command))
+
+    subprocess.call(
+        command,
+        shell=True
+    )
 
 
 ###########
@@ -202,6 +233,7 @@ class Server:
 
         self.online = False
         self.last_check = 0
+        self.last_ping = None
         self.lowest = []
         self.history = []
         self.received = []
@@ -210,6 +242,8 @@ class Server:
         self.jitter = 0
         self.last_pop = 0
 
+        self.check_rrd()
+
     def toJSON(self) -> object:
         return {
             'id': self.id,
@@ -217,6 +251,7 @@ class Server:
             'url': self.url,
             'online': self.online,
             'last_check': self.last_check,
+            'last_ping': self.last_ping,
             'abnormal': self.abnormal(),
             'abnormal_ping': self.abnormal_ping(),
             'abnormal_loss': self.abnormal_loss(),
@@ -229,11 +264,29 @@ class Server:
             'jitter': self.stdev(),
         }
 
-    def receive_ping(self, ms: int) -> object:
+    def touch(self) -> None:
+        self.last_ping = time.time()
+
+    def check_rrd(self) -> None:
+        path = self.get_rrd_path()
+
+        if not os.path.isfile(path):
+            print('Database not found, creating it: {0}'.format(path))
+            create_rrd(path)
+
+    def get_rrd_path(self) -> str:
+        name = re.sub(r"[^A-Za-z0-9]", "_", '{0}'.format(self.url))
+
+        return '{0}{1}.rrd'.format(rrd_path, name)
+
+    def receive_ping(self, ms: int, ttl: int) -> None:
         self.pings += 1
+        self.touch()
 
         # Received history
         self.received.insert(0, ms is not False)
+
+        update_rrd(self.get_rrd_path(), ms, ttl, self.jitter)
 
         # Avoid logic when negative
         if not ms or ms < 0:
@@ -324,9 +377,9 @@ class Server:
 
         # Only ping if server is considered healthy
         if self.online:
-            ms = ping(self.url, ip)
+            ms, ttl = ping(self.url, ip)
 
-            self.receive_ping(ms)
+            self.receive_ping(ms, ttl)
 
     def abnormal_ping(self):
         return (
@@ -399,7 +452,9 @@ class PingsApi(Resource):
         sv = list(filter(lambda x: int(x.id) == int(id), servers))
 
         if len(sv) == 0:
-            return {'error': True}
+            return {
+                'error': True
+            }
 
         return {
             'error': False,
@@ -417,11 +472,17 @@ def worker():
         oldest_time = time.time()
 
         for sv in servers:  # type: Server
-            if oldest is None or sv.last_check < oldest_time:
+            if oldest is None or sv.last_ping is None or sv.last_ping < oldest_time:
                 oldest = sv
-                oldest_time = sv.last_check
+                oldest_time = sv.last_ping
 
-        if oldest is not None:
+        if oldest.last_ping is None:
+            expired = True
+        else:
+            expired = (time.time() - oldest.last_ping) > 1
+
+        if oldest is not None and expired:
+            oldest.touch()
             oldest.health_check()
             oldest.ping()
 
