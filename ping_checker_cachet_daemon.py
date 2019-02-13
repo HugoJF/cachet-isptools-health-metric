@@ -180,7 +180,7 @@ def ping(src: str, dst: str) -> int or False:
     if res['err']:
         return False
 
-    return int(res['ms']), int(res['ttl'])
+    return int(res['ms'])
 
 
 def load_servers() -> None:
@@ -209,8 +209,8 @@ def create_rrd(path) -> None:
     )
 
 
-def update_rrd(path: str, ping: int, ttl: int, jitter: int):
-    command = 'rrdtool update {0} N:{1}:{2}:{3}'.format(path, ping, ttl, jitter)
+def update_rrd(path: str, ping: int):
+    command = 'rrdtool update {0} N:{1}'.format(path, ping)
 
     print('exec: {0}'.format(command))
 
@@ -279,14 +279,14 @@ class Server:
 
         return '{0}{1}.rrd'.format(rrd_path, name)
 
-    def receive_ping(self, ms: int, ttl: int) -> None:
+    def receive_ping(self, ms: int) -> None:
         self.pings += 1
         self.touch()
 
         # Received history
         self.received.insert(0, ms is not False)
 
-        update_rrd(self.get_rrd_path(), ms, ttl, self.jitter)
+        update_rrd(self.get_rrd_path(), ms)
 
         # Avoid logic when negative
         if not ms or ms < 0:
@@ -377,9 +377,9 @@ class Server:
 
         # Only ping if server is considered healthy
         if self.online:
-            ms, ttl = ping(self.url, ip)
+            ms = ping(self.url, ip)
 
-            self.receive_ping(ms, ttl)
+            self.receive_ping(ms)
 
     def abnormal_ping(self):
         return (
