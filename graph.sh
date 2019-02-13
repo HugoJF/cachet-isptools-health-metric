@@ -6,13 +6,12 @@ for filename in ./dbs/*; do
     --imgformat PNG \
     --title="Server latency history (last hour)" \
     --vertical-label "Ping (ms)" \
-    --start=n-60min \
-    --end=n \
+    --start=n-61min \
+    --end=n-1min \
     --color=BACK#CCCCCC \
     --color=CANVAS#FEFEFE \
     --color=SHADEB#9999CC \
     --height=250 \
-    --no-gridfit \
     --watermark "Servidores de_nerdTV | Powered by ISPTools" \
     --slope-mode \
     DEF:pingmin=dbs/$name:ping:MIN:step=120 \
