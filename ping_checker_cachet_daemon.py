@@ -470,9 +470,12 @@ def worker():
     while True:
         oldest = None
         oldest_time = time.time()
-
         for sv in servers:  # type: Server
-            if oldest is None or sv.last_ping is None or sv.last_ping < oldest_time:
+            if sv.last_ping is None:
+                oldest = sv
+                break
+
+            if (oldest is None) or (sv.last_ping < oldest_time):
                 oldest = sv
                 oldest_time = sv.last_ping
 
@@ -502,44 +505,6 @@ def runner():
 
         # Reload DotEnv
         cache_dotenv()
-
-        abnormal = 0
-
-        # Check for abnormal servers
-        table_data = [['Server URL', 'Average', 'History', 'Pings', 'Loss', 'Abnormal']]
-        for sv in servers:
-            if sv.abnormal():
-                abnormal += 1
-
-            table_data.append([
-                sv.url,
-                '{0:.2f} +-{1:.2f}'.format(sv.avg, sv.stdev()),
-                len(sv.history),
-                sv.pings,
-                '{0}'.format(sv.loss()),
-                'YES' if sv.abnormal() else '---'
-            ])
-
-        # Build and print table
-        table = AsciiTable(table_data)
-
-        print(table.table)
-
-        # Debug
-        print('Currently {0} abnormal servers.'.format(abnormal))
-
-        # Build POST data
-        data = {
-            'value': abnormal,
-            'timestamp': int(time.time()),
-        }
-
-        # Send POST
-        try:
-            res = requests.post(url + '/api/v1/metrics/{0}/points'.format(metric_id), data=data, headers=headers)
-            print('Status code for POST: {0}'.format(res.status_code))
-        except:
-            print('Error posting data')
 
         # Flush and wait
         print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
