@@ -253,7 +253,6 @@ class Server:
             'online': self.online,
             'last_check': self.last_health_check,
             'last_ping': self.last_ping,
-            'last_touch': self.last_touch,
             'abnormal': self.abnormal(),
             'abnormal_ping': self.abnormal_ping(),
             'abnormal_loss': self.abnormal_loss(),
