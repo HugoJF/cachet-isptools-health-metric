@@ -550,7 +550,7 @@ cache_dotenv()
 ######################
 
 # Worker thread lock
-lock = threading.Lock
+lock = threading.Lock()
 
 # Stores start time for statistics
 start_time = time.time()
