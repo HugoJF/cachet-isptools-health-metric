@@ -8,7 +8,7 @@ import threading
 import subprocess
 import git
 import sentry_sdk
-from requests.exceptions import ConnectionError, ReadTimeout, ConnectTimeout
+from requests.exceptions import ConnectionError
 from statistics import stdev
 from dotenv import load_dotenv
 from terminaltables import AsciiTable
@@ -143,6 +143,7 @@ def check_for_new_version() -> None:
     repo = git.Repo()
     sha = repo.head.object.hexsha
 
+    print('Running branch SHA check')
     if current_sha is None:
         print('Running on commit #{0}'.format(sha))
         current_sha = sha
@@ -232,7 +233,7 @@ class Server:
         self.url = data[2]
 
         self.online = False
-        self.last_check = 0
+        self.last_health_check = 0
         self.last_ping = None
         self.lowest = []
         self.history = []
@@ -241,6 +242,7 @@ class Server:
         self.avg = -1
         self.jitter = 0
         self.last_pop = 0
+        self.last_touch = 0
 
         self.check_rrd()
 
@@ -250,8 +252,9 @@ class Server:
             'name': self.name,
             'url': self.url,
             'online': self.online,
-            'last_check': self.last_check,
+            'last_check': self.last_health_check,
             'last_ping': self.last_ping,
+            'last_touch': self.last_touch,
             'abnormal': self.abnormal(),
             'abnormal_ping': self.abnormal_ping(),
             'abnormal_loss': self.abnormal_loss(),
@@ -265,6 +268,9 @@ class Server:
         }
 
     def touch(self) -> None:
+        self.last_touch = time.time()
+
+    def update_last_ping(self) -> None:
         self.last_ping = time.time()
 
     def check_rrd(self) -> None:
@@ -281,7 +287,7 @@ class Server:
 
     def receive_ping(self, ms: int) -> None:
         self.pings += 1
-        self.touch()
+        self.update_last_ping()
 
         # Received history
         self.received.insert(0, ms is not False)
@@ -345,9 +351,9 @@ class Server:
 
     def health_check(self) -> None:
         try:
-            if time.time() - self.last_check > 30:
+            if time.time() - self.last_health_check > 30:
                 # Update timer
-                self.last_check = time.time()
+                self.last_health_check = time.time()
 
                 # Request information from server
                 res = requests.get('http://{0}/'.format(self.url), timeout=1)
@@ -419,11 +425,11 @@ class Server:
         return sum(self.lowest) / len(self.lowest)
 
     def ping(self):
-        self.last_check = time.time()
+        self.last_health_check = time.time()
         self.send_ping()
 
     def expired(self):
-        return time.time() - self.last_check > 5
+        return time.time() - self.last_health_check > 5
 
     def wait(self):
         self.ping_thread.join()
@@ -468,27 +474,42 @@ class PingsApi(Resource):
 
 def worker():
     while True:
+        # Reset oldest values
         oldest = None
         oldest_time = time.time()
-        for sv in servers:  # type: Server
-            if sv.last_ping is None:
-                oldest = sv
-                break
 
-            if (oldest is None) or (sv.last_ping < oldest_time):
-                oldest = sv
-                oldest_time = sv.last_ping
+        # Acquire worker lock
+        with lock:
+            # Check what server has the oldest updated time
+            for sv in servers:  # type: Server
+                # First run
+                if sv.last_ping is None:
+                    oldest = sv
+                    break
 
+                # Replace if oldest
+                if (oldest is None) or (sv.last_ping < oldest_time):
+                    oldest = sv
+                    oldest_time = sv.last_ping
+
+            # Mark oldest as touched
+            if oldest is not None:
+                oldest.touch()
+
+        # If server does not have a last_ping, mark as expired
         if oldest.last_ping is None:
             expired = True
+        # Check if server is expired
         else:
             expired = (time.time() - oldest.last_ping) > 1
 
+        # If we found an expired server, run it
         if oldest is not None and expired:
-            oldest.touch()
+            oldest.update_last_ping()
             oldest.health_check()
             oldest.ping()
 
+        # Sleep worker
         time.sleep(ping_interval)
 
 
@@ -527,6 +548,9 @@ cache_dotenv()
 ######################
 # Static declaration #
 ######################
+
+# Worker thread lock
+lock = threading.Lock
 
 # Stores start time for statistics
 start_time = time.time()
