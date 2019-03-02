@@ -468,6 +468,7 @@ class PingsApi(Resource):
 ######################
 
 def worker():
+    print('Worker started...')
     while True:
         # Reset oldest values
         oldest = None
@@ -509,10 +510,11 @@ def worker():
 
 
 def runner():
+
     load_servers()
 
     for i in range(0, worker_count):
-        t = threading.Thread(target=worker)
+        t = threading.Thread(target=worker, name='Worker-{0}'.format(i))
         t.start()
 
     while True:
@@ -524,6 +526,9 @@ def runner():
 
         # Flush and wait
         print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
+        for t in threading.enumerate():
+            print('- {0}'.format(t.getName()))
+
         sys.stdout.flush()
         time.sleep(interval)
 
@@ -582,7 +587,7 @@ api = Api(app)
 CORS(app)
 
 # Prepare runner thread
-runner_thread = threading.Thread(target=runner)
+runner_thread = threading.Thread(target=runner, name='Runner-Thread')
 runner_thread.start()
 
 # Prepare API resources
@@ -590,4 +595,4 @@ api.add_resource(ServerApi, '/servers/')
 api.add_resource(PingsApi, '/pings/<int:id>')
 
 # Run API
-app.run(debug=True, host=host, port=port)
+app.run(debug=False, host=host, port=port)
