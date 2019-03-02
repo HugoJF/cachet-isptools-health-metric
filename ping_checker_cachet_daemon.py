@@ -213,7 +213,7 @@ def create_rrd(path) -> None:
 def update_rrd(path: str, ping: int):
     command = 'rrdtool update {0} N:{1}'.format(path, ping)
 
-    print('exec: {0}'.format(command))
+    # print('exec: {0}'.format(command))
 
     subprocess.call(
         command,
