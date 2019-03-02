@@ -242,7 +242,6 @@ class Server:
         self.avg = -1
         self.jitter = 0
         self.last_pop = 0
-        self.last_touch = 0
 
         self.check_rrd()
 
@@ -268,9 +267,6 @@ class Server:
         }
 
     def touch(self) -> None:
-        self.last_touch = time.time()
-
-    def update_last_ping(self) -> None:
         self.last_ping = time.time()
 
     def check_rrd(self) -> None:
@@ -287,7 +283,7 @@ class Server:
 
     def receive_ping(self, ms: int) -> None:
         self.pings += 1
-        self.update_last_ping()
+        self.touch()
 
         # Received history
         self.received.insert(0, ms is not False)
@@ -505,7 +501,7 @@ def worker():
 
         # If we found an expired server, run it
         if oldest is not None and expired:
-            oldest.update_last_ping()
+            oldest.touch()
             oldest.health_check()
             oldest.ping()
 
