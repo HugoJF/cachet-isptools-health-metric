@@ -488,16 +488,12 @@ def worker():
                     oldest = sv
                     oldest_time = sv.last_ping
 
-            # Mark oldest as touched
-            if oldest is not None:
-                oldest.touch()
-
-        # If server does not have a last_ping, mark as expired
-        if oldest.last_ping is None:
-            expired = True
-        # Check if server is expired
-        else:
-            expired = (time.time() - oldest.last_ping) > 1
+            # If server does not have a last_ping, mark as expired
+            if oldest.last_ping is None:
+                expired = True
+            # Check if server is expired
+            else:
+                expired = (time.time() - oldest.last_ping) > 1
 
         # If we found an expired server, run it
         if oldest is not None and expired:
@@ -526,8 +522,11 @@ def runner():
 
         # Flush and wait
         print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
+
         for t in threading.enumerate():
-            print('- {0}'.format(t.getName()))
+            print('{0}'.format(t.getName()), end=', ')
+
+        print()
 
         sys.stdout.flush()
         time.sleep(interval)
