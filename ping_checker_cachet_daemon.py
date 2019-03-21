@@ -159,13 +159,16 @@ def ping(src: str, dst: str) -> int or False:
     :param dst: IP address
     :return: int: ping in milliseconds or False if ping failed
     """
-    global pinging_timeout
+    global pinging_timeout, session
+
+    if session is None:
+        session = requests.session()
 
     url = api_url.format(src, dst)
 
     # Send GET request
     try:
-        res = requests.get(url, timeout=pinging_timeout)
+        res = session.get(url, timeout=pinging_timeout)
     except:
         eprint('Exception while requesting pings')
         return False
@@ -470,39 +473,42 @@ class PingsApi(Resource):
 def worker():
     print('Worker started...')
     while True:
-        # Reset oldest values
-        oldest = None
-        oldest_time = time.time()
+        try:
+            # Reset oldest values
+            oldest = None
+            oldest_time = time.time()
 
-        # Acquire worker lock
-        with lock:
-            # Check what server has the oldest updated time
-            for sv in servers:  # type: Server
-                # First run
-                if sv.last_ping is None:
-                    oldest = sv
-                    break
+            # Acquire worker lock
+            with lock:
+                # Check what server has the oldest updated time
+                for sv in servers:  # type: Server
+                    # First run
+                    if sv.last_ping is None:
+                        oldest = sv
+                        break
 
-                # Replace if oldest
-                if (oldest is None) or (sv.last_ping < oldest_time):
-                    oldest = sv
-                    oldest_time = sv.last_ping
+                    # Replace if oldest
+                    if (oldest is None) or (sv.last_ping < oldest_time):
+                        oldest = sv
+                        oldest_time = sv.last_ping
 
-            # If server does not have a last_ping, mark as expired
-            if oldest.last_ping is None:
-                expired = True
-            # Check if server is expired
-            else:
-                expired = (time.time() - oldest.last_ping) > 1
+                # If server does not have a last_ping, mark as expired
+                if oldest.last_ping is None:
+                    expired = True
+                # Check if server is expired
+                else:
+                    expired = (time.time() - oldest.last_ping) > 1
 
-        # If we found an expired server, run it
-        if oldest is not None and expired:
-            oldest.touch()
-            oldest.health_check()
-            oldest.ping()
+            # If we found an expired server, run it
+            if oldest is not None and expired:
+                oldest.touch()
+                oldest.health_check()
+                oldest.ping()
 
-        # Sleep worker
-        time.sleep(ping_interval)
+            # Sleep worker
+            time.sleep(ping_interval)
+        except:
+            print('Exception in worker thread caught')
 
 
 def runner():
@@ -570,6 +576,9 @@ servers = []
 headers = {
     'X-Cachet-Token': api_key
 }
+
+# Session used to request GETs
+session = None
 
 #########################
 # Static initialization #
