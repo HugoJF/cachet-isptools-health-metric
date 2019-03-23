@@ -20,7 +20,7 @@ for filename in ./dbs/*; do
     DEF:pingmaxx=dbs/$name:ping:MAX:step=500 \
     CDEF:ping=pingg,0,MAX,200,MIN \
     CDEF:pingmax=pingmaxx,200,MIN \
-    CDEF:pingmin=pingminn,0,MAX \
+    CDEF:pingmin=pingminn,200,MIN \
     CDEF:err=pingmax,190,GT \
     CDEF:delta=pingmax,pingmin,- \
     VDEF:lastmin=pingmin,LAST \
