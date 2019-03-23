@@ -1,8 +1,8 @@
 for filename in ./dbs/*; do
     echo rendering $filename
     name=$(basename $filename)
-    
-    rrdtool graph graphs/"${name/.rrd/}_1d".png \
+
+    rrdtool graph graphs/"${name/.rrd/}".png \
     --imgformat PNG \
     --title="Server latency history (last 24 hours)" \
     --vertical-label "Ping (ms)" \
