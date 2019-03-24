@@ -585,7 +585,7 @@ session = None
 #########################
 
 # Initialize sentry
-sentry_sdk.init(sentry_url, auto_log_stacks=True)
+sentry_sdk.init(sentry_url)
 
 # Initialize Flask
 app = Flask('PingChecker')
