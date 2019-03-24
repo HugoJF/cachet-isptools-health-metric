@@ -512,32 +512,32 @@ def worker():
 
 
 def runner():
+    try:
+        load_servers()
 
-    load_servers()
+        for i in range(0, worker_count):
+            t = threading.Thread(target=worker, name='Worker-{0}'.format(i))
+            t.start()
 
-    for i in range(0, worker_count):
-        t = threading.Thread(target=worker, name='Worker-{0}'.format(i))
-        t.start()
+        while True:
+            # Check if there is a new version
+            check_for_new_version()
 
-    while True:
-        # Check if there is a new version
-        check_for_new_version()
+            # Reload DotEnv
+            cache_dotenv()
 
-        # Reload DotEnv
-        cache_dotenv()
+            # Flush and wait
+            print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
 
-        # Flush and wait
-        print('Sleeping {0} seconds with {1} threads alive'.format(interval, threading.active_count()))
+            for t in threading.enumerate():
+                print('{0}'.format(t.getName()), end=', ')
 
-        for t in threading.enumerate():
-            print('{0}'.format(t.getName()), end=', ')
+            print()
 
-        print()
-
-        sys.stdout.flush()
-        time.sleep(interval)
-
-
+            sys.stdout.flush()
+            time.sleep(interval)
+    except:
+        print('Exception on runner thread')
 #############################
 # DotEnv variable re-naming #
 #############################
@@ -585,7 +585,7 @@ session = None
 #########################
 
 # Initialize sentry
-sentry_sdk.init(sentry_url)
+sentry_sdk.init(sentry_url, auto_log_stacks=True)
 
 # Initialize Flask
 app = Flask('PingChecker')
